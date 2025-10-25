@@ -124,8 +124,8 @@ class BrowserManager:
                 self._page = await self._context.new_page()
                 print("New page created")
                 
-                print("Navigating to Google...")
-                await self._page.goto("https://www.google.com")
+                print("Navigating to scrapingbee...")
+                await self._page.goto("https://www.scrapingbee.com/blog/")
                 print("Browser initialization completed successfully!")
                 
             except Exception as e:
@@ -269,7 +269,10 @@ class BrowserManager:
             print(f"Mock: Mouse moved to ({x}, {y})")
             return
         
-        await self._page.mouse.move(x, y)
+        try:
+            await self._page.mouse.move(x, y)
+        except Exception as e:
+            print(f"Error in mouse_move: {e}")
     
     async def mouse_click(self, x: int, y: int, button: str = "left"):
         """Click at coordinates."""
@@ -280,30 +283,54 @@ class BrowserManager:
             print(f"Mock: Mouse clicked at ({x}, {y}) with {button} button")
             return
         
-        await self._page.mouse.click(x, y, button=button)
+        try:
+            await self._page.mouse.click(x, y, button=button)
+        except Exception as e:
+            print(f"Error in mouse_click: {e}")
     
     async def mouse_down(self, x: int, y: int, button: str = "left"):
         """Mouse down at coordinates."""
         if not self._page:
             await self.initialize()
         
-        await self._page.mouse.move(x, y)
-        await self._page.mouse.down(button=button)
+        if self._page == "mock":
+            print(f"Mock: Mouse down at ({x}, {y}) with {button} button")
+            return
+        
+        try:
+            await self._page.mouse.move(x, y)
+            await self._page.mouse.down(button=button)
+        except Exception as e:
+            print(f"Error in mouse_down: {e}")
     
     async def mouse_up(self, x: int, y: int, button: str = "left"):
         """Mouse up at coordinates."""
         if not self._page:
             await self.initialize()
         
-        await self._page.mouse.move(x, y)
-        await self._page.mouse.up(button=button)
+        if self._page == "mock":
+            print(f"Mock: Mouse up at ({x}, {y}) with {button} button")
+            return
+        
+        try:
+            await self._page.mouse.move(x, y)
+            await self._page.mouse.up(button=button)
+        except Exception as e:
+            print(f"Error in mouse_up: {e}")
     
     async def mouse_wheel(self, delta_x: int, delta_y: int):
         """Scroll with mouse wheel."""
         if not self._page:
             await self.initialize()
         
-        await self._page.mouse.wheel(delta_x, delta_y)
+        if self._page == "mock":
+            print(f"Mock: Mouse wheel delta_x={delta_x}, delta_y={delta_y}")
+            return
+        
+        try:
+            await self._page.mouse.wheel(delta_x, delta_y)
+        except Exception as e:
+            print(f"Error in mouse_wheel: {e}")
     
     async def keyboard_press(self, key: str):
         """Press a key."""
@@ -314,7 +341,10 @@ class BrowserManager:
             print(f"Mock: Key pressed: {key}")
             return
         
-        await self._page.keyboard.press(key)
+        try:
+            await self._page.keyboard.press(key)
+        except Exception as e:
+            print(f"Error in keyboard_press: {e}")
     
     async def keyboard_type(self, text: str):
         """Type text."""
@@ -325,7 +355,10 @@ class BrowserManager:
             print(f"Mock: Typed text: {text}")
             return
         
-        await self._page.keyboard.type(text)
+        try:
+            await self._page.keyboard.type(text)
+        except Exception as e:
+            print(f"Error in keyboard_type: {e}")
     
     async def navigate_to(self, url: str):
         """Navigate to URL."""

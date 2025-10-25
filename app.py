@@ -112,48 +112,59 @@ async def handle_client_message(message: dict):
         
         if message_type == "mouse_move":
             x, y = message.get("x", 0), message.get("y", 0)
+            logger.info(f"Mouse move: ({x}, {y})")
             await browser_manager.mouse_move(x, y)
         
         elif message_type == "mouse_click":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
+            logger.info(f"Mouse click: ({x}, {y}) button={button}")
             await browser_manager.mouse_click(x, y, button)
         
         elif message_type == "mouse_down":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
+            logger.info(f"Mouse down: ({x}, {y}) button={button}")
             await browser_manager.mouse_down(x, y, button)
         
         elif message_type == "mouse_up":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
+            logger.info(f"Mouse up: ({x}, {y}) button={button}")
             await browser_manager.mouse_up(x, y, button)
         
         elif message_type == "mouse_wheel":
             delta_x = message.get("deltaX", 0)
             delta_y = message.get("deltaY", 0)
+            logger.info(f"Mouse wheel: deltaX={delta_x}, deltaY={delta_y}")
             await browser_manager.mouse_wheel(delta_x, delta_y)
         
         elif message_type == "key_press":
             key = message.get("key")
             if key:
+                logger.info(f"Key press: {key}")
                 await browser_manager.keyboard_press(key)
         
         elif message_type == "key_type":
             text = message.get("text", "")
+            logger.info(f"Key type: '{text}'")
             await browser_manager.keyboard_type(text)
         
         elif message_type == "navigate":
             url = message.get("url", "")
+            logger.info(f"Navigate to: {url}")
             await browser_manager.navigate_to(url)
         
         elif message_type == "go_back":
+            logger.info("Go back")
             await browser_manager.go_back()
         
         elif message_type == "go_forward":
+            logger.info("Go forward")
             await browser_manager.go_forward()
         
         elif message_type == "refresh":
+            logger.info("Refresh page")
             await browser_manager.refresh()
         
         else:

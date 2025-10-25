@@ -8,8 +8,9 @@ class RemoteBrowserController {
         this.urlInput = document.getElementById('urlInput');
         
         this.isConnected = false;
-        this.browserViewport = { width: 1920, height: 1080 };
+        this.browserViewport = null;
         this.scale = 1;
+        this.mousePosition = { x: 0, y: 0 };
         
         this.setupEventListeners();
         this.connect();
@@ -93,9 +94,28 @@ class RemoteBrowserController {
         switch (message.type) {
             case 'screenshot':
                 this.displayScreenshot(message.data);
-                this.browserViewport = message.viewport;
-                console.log('Received viewport:', this.browserViewport);
-                this.updateCanvasSize();
+                
+                // Always update viewport and canvas size on first screenshot or when viewport changes
+                const newViewport = message.viewport;
+                const currentViewport = this.browserViewport;
+                
+                const viewportChanged = !currentViewport || 
+                    (Array.isArray(newViewport) && Array.isArray(currentViewport) && 
+                     (newViewport[0] !== currentViewport[0] || newViewport[1] !== currentViewport[1])) ||
+                    (!Array.isArray(newViewport) && !Array.isArray(currentViewport) && 
+                     (newViewport.width !== currentViewport.width || newViewport.height !== currentViewport.height));
+                
+                if (!currentViewport) {
+                    console.log('Initial viewport set to', newViewport);
+                    this.browserViewport = newViewport;
+                    this.updateCanvasSize();
+                } else if (viewportChanged) {
+                    console.log('Viewport changed from', currentViewport, 'to', newViewport);
+                    this.browserViewport = newViewport;
+                    this.updateCanvasSize();
+                } else {
+                    console.log('Viewport unchanged, skipping updateCanvasSize');
+                }
                 break;
         }
     }
@@ -106,11 +126,30 @@ class RemoteBrowserController {
             console.log('Image loaded, canvas size:', this.canvas.width, 'x', this.canvas.height);
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
             this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
+            
+            // Draw mouse cursor indicator
+            this.drawMouseCursor();
         };
         img.onerror = (e) => {
             console.error('Image load error:', e);
         };
         img.src = `data:image/jpeg;base64,${screenshotData}`;
+    }
+    
+    drawMouseCursor() {
+        // Draw a small red circle at the actual mouse position on canvas
+        const canvasX = this.mousePosition.canvasX;
+        const canvasY = this.mousePosition.canvasY;
+        
+        this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.arc(canvasX, canvasY, 5, 0, 2 * Math.PI);
+        this.ctx.fillStyle = 'red';
+        this.ctx.fill();
+        this.ctx.strokeStyle = 'white';
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+        this.ctx.restore();
     }
     
     updateCanvasSize() {
@@ -124,22 +163,25 @@ class RemoteBrowserController {
         
         const aspectRatio = viewportWidth / viewportHeight;
         
-        let canvasWidth = viewportWidth;
-        let canvasHeight = viewportHeight;
+        // Calculate the maximum size that fits in the container while maintaining aspect ratio
+        let canvasWidth = Math.min(viewportWidth, maxWidth);
+        let canvasHeight = canvasWidth / aspectRatio;
         
-        if (canvasWidth > maxWidth) {
-            canvasWidth = maxWidth;
-            canvasHeight = canvasWidth / aspectRatio;
-        }
-        
+        // If height is too big, scale down based on height
         if (canvasHeight > maxHeight) {
             canvasHeight = maxHeight;
             canvasWidth = canvasHeight * aspectRatio;
         }
         
-        this.canvas.width = canvasWidth;
-        this.canvas.height = canvasHeight;
+        // Only resize if dimensions have actually changed
+        if (Math.abs(this.canvas.width - canvasWidth) > 1 || Math.abs(this.canvas.height - canvasHeight) > 1) {
+            console.log(`Canvas resize: ${this.canvas.width}x${this.canvas.height} -> ${canvasWidth}x${canvasHeight}`);
+            this.canvas.width = canvasWidth;
+            this.canvas.height = canvasHeight;
+        }
+        
         this.scale = canvasWidth / viewportWidth;
+        console.log(`Scale: ${this.scale.toFixed(3)} (canvas: ${canvasWidth} / viewport: ${viewportWidth})`);
     }
     
     getCanvasCoordinates(event) {
@@ -153,6 +195,14 @@ class RemoteBrowserController {
         if (!this.isConnected) return;
         
         const coords = this.getCanvasCoordinates(event);
+        // Store the raw canvas coordinates for drawing the red dot
+        const rect = this.canvas.getBoundingClientRect();
+        this.mousePosition = { 
+            x: coords.x, 
+            y: coords.y,
+            canvasX: event.clientX - rect.left,
+            canvasY: event.clientY - rect.top
+        };
         this.sendMessage({
             type: 'mouse_move',
             x: coords.x,
