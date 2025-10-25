@@ -37,6 +37,8 @@ class BrowserManager:
     _selenium_driver = None
     _viewport_size = (1920, 1080)
     _browser_type = None  # 'playwright', 'selenium', or 'mock'
+    _pages = []  # List of all open pages
+    _active_page_index = 0  # Index of currently active page
     
     def __new__(cls):
         if cls._instance is None:
@@ -122,7 +124,12 @@ class BrowserManager:
                 
                 self._browser = self._context
                 self._page = await self._context.new_page()
+                self._pages = [self._page]  # Initialize pages list
+                self._active_page_index = 0
                 print("New page created")
+                
+                # Set up page event listeners
+                self._context.on("page", self._on_new_page)
                 
                 print("Navigating to scrapingbee...")
                 await self._page.goto("https://www.scrapingbee.com/blog/")
@@ -171,6 +178,15 @@ class BrowserManager:
             # Create a mock page for testing
             self._create_mock_browser()
     
+    def _on_new_page(self, page):
+        """Handle new page events (new tabs/windows)."""
+        print(f"New page opened: {page.url}")
+        self._pages.append(page)
+        # Automatically switch to the new page for OAuth flows
+        self._active_page_index = len(self._pages) - 1
+        self._page = page
+        print(f"Switched to new page. Total pages: {len(self._pages)}")
+    
     def _create_mock_browser(self):
         """Create a mock browser for testing when real browser fails."""
         print("Creating mock browser for testing...")
@@ -178,6 +194,8 @@ class BrowserManager:
         self._context = "mock"
         self._page = "mock"
         self._browser_type = "mock"
+        self._pages = ["mock"]
+        self._active_page_index = 0
     
     async def get_screenshot(self) -> str:
         """Capture screenshot and return as base64 encoded string."""
@@ -398,6 +416,60 @@ class BrowserManager:
     def get_viewport_size(self) -> list:
         """Get current viewport size."""
         return list(self._viewport_size)
+    
+    def get_pages_info(self) -> list:
+        """Get information about all open pages."""
+        pages_info = []
+        for i, page in enumerate(self._pages):
+            if page == "mock":
+                pages_info.append({
+                    "index": i,
+                    "url": "mock://page",
+                    "title": "Mock Page",
+                    "active": i == self._active_page_index
+                })
+            else:
+                try:
+                    pages_info.append({
+                        "index": i,
+                        "url": page.url,
+                        "title": page.title() if hasattr(page, 'title') else "Unknown",
+                        "active": i == self._active_page_index
+                    })
+                except:
+                    pages_info.append({
+                        "index": i,
+                        "url": "unknown://page",
+                        "title": "Unknown Page",
+                        "active": i == self._active_page_index
+                    })
+        return pages_info
+    
+    async def switch_to_page(self, page_index: int) -> bool:
+        """Switch to a specific page by index."""
+        if 0 <= page_index < len(self._pages):
+            self._active_page_index = page_index
+            self._page = self._pages[page_index]
+            print(f"Switched to page {page_index}: {self._page.url if hasattr(self._page, 'url') else 'mock'}")
+            return True
+        return False
+    
+    async def close_page(self, page_index: int) -> bool:
+        """Close a specific page by index."""
+        if 0 <= page_index < len(self._pages) and len(self._pages) > 1:
+            page_to_close = self._pages[page_index]
+            if page_to_close != "mock":
+                await page_to_close.close()
+            self._pages.pop(page_index)
+            
+            # Adjust active page index if needed
+            if self._active_page_index >= len(self._pages):
+                self._active_page_index = len(self._pages) - 1
+                self._page = self._pages[self._active_page_index]
+            
+            print(f"Closed page {page_index}. Active page: {self._active_page_index}")
+            return True
+        return False
     
     async def close(self):
         """Close the browser."""

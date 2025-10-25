@@ -167,6 +167,34 @@ async def handle_client_message(message: dict):
             logger.info("Refresh page")
             await browser_manager.refresh()
         
+        elif message_type == "get_pages":
+            logger.info("Get pages info")
+            pages_info = browser_manager.get_pages_info()
+            await websocket.send_text(json.dumps({
+                "type": "pages_info",
+                "pages": pages_info
+            }))
+        
+        elif message_type == "switch_page":
+            page_index = message.get("page_index", 0)
+            logger.info(f"Switch to page {page_index}")
+            success = await browser_manager.switch_to_page(page_index)
+            await websocket.send_text(json.dumps({
+                "type": "page_switched",
+                "success": success,
+                "page_index": page_index
+            }))
+        
+        elif message_type == "close_page":
+            page_index = message.get("page_index", 0)
+            logger.info(f"Close page {page_index}")
+            success = await browser_manager.close_page(page_index)
+            await websocket.send_text(json.dumps({
+                "type": "page_closed",
+                "success": success,
+                "page_index": page_index
+            }))
+        
         else:
             logger.warning(f"Unknown message type: {message_type}")
     
