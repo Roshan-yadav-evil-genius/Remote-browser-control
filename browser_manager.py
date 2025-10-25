@@ -39,6 +39,7 @@ class BrowserManager:
     _browser_type = None  # 'playwright', 'selenium', or 'mock'
     _pages = []  # List of all open pages
     _active_page_index = 0  # Index of currently active page
+    _creating_tab = False  # Flag to prevent duplicate tab creation
     
     def __new__(cls):
         if cls._instance is None:
@@ -181,11 +182,25 @@ class BrowserManager:
     def _on_new_page(self, page):
         """Handle new page events (new tabs/windows)."""
         print(f"New page opened: {page.url}")
-        self._pages.append(page)
-        # Automatically switch to the new page for OAuth flows
-        self._active_page_index = len(self._pages) - 1
-        self._page = page
-        print(f"Switched to new page. Total pages: {len(self._pages)}")
+        
+        # Check if this page already exists (same URL)
+        existing_page = None
+        for i, existing in enumerate(self._pages):
+            if existing != "mock" and hasattr(existing, 'url') and existing.url == page.url:
+                existing_page = i
+                break
+        
+        if existing_page is not None:
+            print(f"Page with URL {page.url} already exists, switching to it instead of creating duplicate")
+            self._active_page_index = existing_page
+            self._page = self._pages[existing_page]
+        else:
+            self._pages.append(page)
+            # Automatically switch to the new page for OAuth flows
+            self._active_page_index = len(self._pages) - 1
+            self._page = page
+            print(f"Added new page. Total pages: {len(self._pages)}")
+        
         print(f"Pages list: {[p.url if hasattr(p, 'url') else 'mock' for p in self._pages]}")
     
     def _create_mock_browser(self):
@@ -421,7 +436,12 @@ class BrowserManager:
     def get_pages_info(self) -> list:
         """Get information about all open pages."""
         print(f"get_pages_info called, tracking {len(self._pages)} pages")
+        
+        # Clean up duplicate pages first
+        self.cleanup_duplicate_pages()
+        
         pages_info = []
+        
         for i, page in enumerate(self._pages):
             if page == "mock":
                 pages_info.append({
@@ -441,7 +461,7 @@ class BrowserManager:
                             title = page._title
                         elif hasattr(page, 'url'):
                             # Extract title from URL or use a default
-                            if 'google' in url.lower():
+                            if 'google.com' in url.lower():
                                 title = "Google"
                             elif 'scrapingbee' in url.lower():
                                 title = "ScrapingBee"
@@ -464,6 +484,8 @@ class BrowserManager:
                         "title": "Unknown Page",
                         "active": i == self._active_page_index
                     })
+        
+        print(f"Returning {len(pages_info)} unique pages")
         return pages_info
     
     async def switch_to_page(self, page_index: int) -> bool:
@@ -492,22 +514,72 @@ class BrowserManager:
             return True
         return False
     
+    def cleanup_duplicate_pages(self):
+        """Remove duplicate pages based on URL."""
+        if not self._pages:
+            return
+        
+        seen_urls = set()
+        unique_pages = []
+        
+        for page in self._pages:
+            if page == "mock":
+                unique_pages.append(page)
+            else:
+                try:
+                    url = getattr(page, 'url', 'unknown://page')
+                    if url not in seen_urls:
+                        seen_urls.add(url)
+                        unique_pages.append(page)
+                    else:
+                        print(f"Removing duplicate page with URL: {url}")
+                except:
+                    unique_pages.append(page)
+        
+        if len(unique_pages) != len(self._pages):
+            print(f"Cleaned up {len(self._pages) - len(unique_pages)} duplicate pages")
+            self._pages = unique_pages
+            # Adjust active page index if needed
+            if self._active_page_index >= len(self._pages):
+                self._active_page_index = max(0, len(self._pages) - 1)
+                if self._pages:
+                    self._page = self._pages[self._active_page_index]
+    
     async def add_new_tab(self) -> bool:
         """Add a new tab to the browser."""
         try:
             if self._context and self._context != "mock":
+                # Prevent multiple simultaneous tab creation
+                if self._creating_tab:
+                    print("Tab creation already in progress, ignoring duplicate request")
+                    return False
+                
+                self._creating_tab = True
+                
+                # Check if we already have a Google tab to avoid duplicates
+                google_tabs = [page for page in self._pages if hasattr(page, 'url') and 'google.com' in page.url]
+                if google_tabs:
+                    print(f"Google tab already exists, switching to it. Total pages: {len(self._pages)}")
+                    self._active_page_index = self._pages.index(google_tabs[0])
+                    self._page = google_tabs[0]
+                    self._creating_tab = False
+                    return True
+                
+                print(f"Creating new Google tab. Current pages: {len(self._pages)}")
                 new_page = await self._context.new_page()
-                await new_page.goto("about:blank")
+                await new_page.goto("https://www.google.com")
                 self._pages.append(new_page)
                 self._active_page_index = len(self._pages) - 1
                 self._page = new_page
-                print(f"Added new tab. Total pages: {len(self._pages)}")
+                print(f"Added new tab with Google.com. Total pages: {len(self._pages)}")
+                self._creating_tab = False
                 return True
             else:
                 print("Cannot add new tab in mock mode")
                 return False
         except Exception as e:
             print(f"Error adding new tab: {e}")
+            self._creating_tab = False
             return False
     
     async def close(self):

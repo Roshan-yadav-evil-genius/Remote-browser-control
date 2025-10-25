@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Store active WebSocket connections
 active_connections = set()
 
+# Store last add_tab request time to prevent duplicates
+last_add_tab_time = 0
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
@@ -197,11 +200,35 @@ async def handle_client_message(message: dict, websocket: WebSocket):
             }))
         
         elif message_type == "add_tab":
+            import time
+            current_time = time.time()
+            global last_add_tab_time
+            
+            # Prevent duplicate requests within 5 seconds
+            if current_time - last_add_tab_time < 5.0:
+                logger.info("Add tab request ignored (too soon after last request)")
+                await websocket.send_text(json.dumps({
+                    "type": "tab_added",
+                    "success": False,
+                    "reason": "duplicate_request"
+                }))
+                return
+            
+            last_add_tab_time = current_time
             logger.info("Add new tab")
             success = await browser_manager.add_new_tab()
             await websocket.send_text(json.dumps({
                 "type": "tab_added",
                 "success": success
+            }))
+        
+        elif message_type == "refresh_pages":
+            logger.info("Refresh pages list")
+            browser_manager.cleanup_duplicate_pages()
+            pages_info = browser_manager.get_pages_info()
+            await websocket.send_text(json.dumps({
+                "type": "pages_info",
+                "pages": pages_info
             }))
         
         else:

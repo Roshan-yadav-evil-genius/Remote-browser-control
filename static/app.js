@@ -7,6 +7,7 @@ class RemoteBrowserController {
         this.connectionStatus = document.getElementById('connectionStatus');
         this.urlInput = document.getElementById('urlInput');
         this.addTabBtn = document.getElementById('addTabBtn');
+        this.refreshTabsBtn = document.getElementById('refreshTabsBtn');
         
         this.isConnected = false;
         this.browserViewport = null;
@@ -14,6 +15,7 @@ class RemoteBrowserController {
         this.mousePosition = { x: 0, y: 0 };
         this.pages = [];
         this.activePageIndex = 0;
+        this.addTabDebounce = false;
         
         this.setupEventListeners();
         this.connect();
@@ -36,6 +38,11 @@ class RemoteBrowserController {
         // Add new tab button
         this.addTabBtn.addEventListener('click', () => {
             this.addNewTab();
+        });
+        
+        // Refresh tabs button
+        this.refreshTabsBtn.addEventListener('click', () => {
+            this.refreshTabs();
         });
         
         // Canvas mouse events
@@ -132,6 +139,8 @@ class RemoteBrowserController {
                 console.log('Received pages info:', message.pages);
                 this.pages = message.pages;
                 this.updateTabs();
+                // Update URL bar to show current page URL
+                this.updateUrlBar();
                 break;
                 
             case 'page_switched':
@@ -153,6 +162,10 @@ class RemoteBrowserController {
             case 'tab_added':
                 if (message.success) {
                     this.requestPagesInfo(); // Refresh the pages list
+                    // Update URL bar for new tab
+                    setTimeout(() => this.updateUrlBar(), 100);
+                } else if (message.reason === 'duplicate_request') {
+                    console.log('Tab add request was duplicate, ignored');
                 }
                 break;
         }
@@ -369,7 +382,13 @@ class RemoteBrowserController {
         console.log('updateTabs called with pages:', this.pages);
         const tabsList = document.getElementById('tabsList');
         
+        // Clear existing tabs
         tabsList.innerHTML = '';
+        
+        if (!this.pages || this.pages.length === 0) {
+            console.log('No pages to display');
+            return;
+        }
         
         this.pages.forEach((page, index) => {
             const tabItem = document.createElement('div');
@@ -398,6 +417,8 @@ class RemoteBrowserController {
             
             tabsList.appendChild(tabItem);
         });
+        
+        console.log(`Updated tabs list with ${this.pages.length} tabs`);
     }
     
     switchToPage(pageIndex) {
@@ -421,9 +442,44 @@ class RemoteBrowserController {
     }
     
     addNewTab() {
+        if (this.addTabDebounce) {
+            console.log('Add tab request ignored (debounced)');
+            return;
+        }
+        
+        this.addTabDebounce = true;
         console.log('Adding new tab');
+        
+        // Visual feedback - disable button temporarily
+        this.addTabBtn.disabled = true;
+        this.addTabBtn.textContent = '...';
+        
         this.sendMessage({
             type: 'add_tab'
+        });
+        
+        // Reset debounce after 5 seconds (longer than server-side debounce)
+        setTimeout(() => {
+            this.addTabDebounce = false;
+            this.addTabBtn.disabled = false;
+            this.addTabBtn.textContent = '+';
+        }, 5000);
+    }
+    
+    updateUrlBar() {
+        if (this.pages && this.pages.length > 0 && this.activePageIndex < this.pages.length) {
+            const currentPage = this.pages[this.activePageIndex];
+            if (currentPage && currentPage.url) {
+                this.urlInput.value = currentPage.url;
+                console.log('Updated URL bar to:', currentPage.url);
+            }
+        }
+    }
+    
+    refreshTabs() {
+        console.log('Refreshing tabs to remove duplicates');
+        this.sendMessage({
+            type: 'refresh_pages'
         });
     }
 }
