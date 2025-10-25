@@ -154,8 +154,8 @@ class RemoteBrowserController {
     
     updateCanvasSize() {
         const container = this.canvas.parentElement;
-        const maxWidth = container.clientWidth - 40;
-        const maxHeight = window.innerHeight * 0.8;
+        const maxWidth = container.clientWidth - 20;  // Reduced from 40 to 20
+        const maxHeight = window.innerHeight * 0.9;    // Increased from 0.8 to 0.9
         
         // Handle both array [width, height] and object {width, height} formats
         const viewportWidth = Array.isArray(this.browserViewport) ? this.browserViewport[0] : this.browserViewport.width;
