@@ -186,6 +186,7 @@ class BrowserManager:
         self._active_page_index = len(self._pages) - 1
         self._page = page
         print(f"Switched to new page. Total pages: {len(self._pages)}")
+        print(f"Pages list: {[p.url if hasattr(p, 'url') else 'mock' for p in self._pages]}")
     
     def _create_mock_browser(self):
         """Create a mock browser for testing when real browser fails."""
@@ -419,6 +420,7 @@ class BrowserManager:
     
     def get_pages_info(self) -> list:
         """Get information about all open pages."""
+        print(f"get_pages_info called, tracking {len(self._pages)} pages")
         pages_info = []
         for i, page in enumerate(self._pages):
             if page == "mock":
@@ -430,13 +432,32 @@ class BrowserManager:
                 })
             else:
                 try:
+                    # Get URL and title safely
+                    url = getattr(page, 'url', 'unknown://page')
+                    title = "Unknown Page"
+                    try:
+                        # Try to get title synchronously if possible
+                        if hasattr(page, '_title'):
+                            title = page._title
+                        elif hasattr(page, 'url'):
+                            # Extract title from URL or use a default
+                            if 'google' in url.lower():
+                                title = "Google"
+                            elif 'scrapingbee' in url.lower():
+                                title = "ScrapingBee"
+                            else:
+                                title = "Browser Tab"
+                    except:
+                        title = "Browser Tab"
+                    
                     pages_info.append({
                         "index": i,
-                        "url": page.url,
-                        "title": page.title() if hasattr(page, 'title') else "Unknown",
+                        "url": url,
+                        "title": title,
                         "active": i == self._active_page_index
                     })
-                except:
+                except Exception as e:
+                    print(f"Error getting page info for page {i}: {e}")
                     pages_info.append({
                         "index": i,
                         "url": "unknown://page",
@@ -470,6 +491,24 @@ class BrowserManager:
             print(f"Closed page {page_index}. Active page: {self._active_page_index}")
             return True
         return False
+    
+    async def add_new_tab(self) -> bool:
+        """Add a new tab to the browser."""
+        try:
+            if self._context and self._context != "mock":
+                new_page = await self._context.new_page()
+                await new_page.goto("about:blank")
+                self._pages.append(new_page)
+                self._active_page_index = len(self._pages) - 1
+                self._page = new_page
+                print(f"Added new tab. Total pages: {len(self._pages)}")
+                return True
+            else:
+                print("Cannot add new tab in mock mode")
+                return False
+        except Exception as e:
+            print(f"Error adding new tab: {e}")
+            return False
     
     async def close(self):
         """Close the browser."""

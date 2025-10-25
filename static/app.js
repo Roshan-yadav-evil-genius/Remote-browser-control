@@ -6,6 +6,7 @@ class RemoteBrowserController {
         this.loadingOverlay = document.getElementById('loadingOverlay');
         this.connectionStatus = document.getElementById('connectionStatus');
         this.urlInput = document.getElementById('urlInput');
+        this.addTabBtn = document.getElementById('addTabBtn');
         
         this.isConnected = false;
         this.browserViewport = null;
@@ -30,6 +31,11 @@ class RemoteBrowserController {
             if (e.key === 'Enter') {
                 this.navigate();
             }
+        });
+        
+        // Add new tab button
+        this.addTabBtn.addEventListener('click', () => {
+            this.addNewTab();
         });
         
         // Canvas mouse events
@@ -123,6 +129,7 @@ class RemoteBrowserController {
                 break;
                 
             case 'pages_info':
+                console.log('Received pages info:', message.pages);
                 this.pages = message.pages;
                 this.updateTabs();
                 break;
@@ -131,6 +138,8 @@ class RemoteBrowserController {
                 if (message.success) {
                     this.activePageIndex = message.page_index;
                     this.updateTabs();
+                    // Update URL bar to show current page URL
+                    this.updateUrlBar();
                 }
                 break;
                 
@@ -138,6 +147,12 @@ class RemoteBrowserController {
                 if (message.success) {
                     this.pages = this.pages.filter((_, index) => index !== message.page_index);
                     this.updateTabs();
+                }
+                break;
+                
+            case 'tab_added':
+                if (message.success) {
+                    this.requestPagesInfo(); // Refresh the pages list
                 }
                 break;
         }
@@ -351,32 +366,37 @@ class RemoteBrowserController {
     }
     
     updateTabs() {
-        const tabsContainer = document.getElementById('tabsContainer');
+        console.log('updateTabs called with pages:', this.pages);
         const tabsList = document.getElementById('tabsList');
         
-        if (this.pages.length <= 1) {
-            tabsContainer.style.display = 'none';
-            return;
-        }
-        
-        tabsContainer.style.display = 'block';
         tabsList.innerHTML = '';
         
         this.pages.forEach((page, index) => {
-            const tab = document.createElement('div');
-            tab.className = `tab ${index === this.activePageIndex ? 'active' : ''}`;
-            tab.innerHTML = `
-                <span class="tab-title" title="${page.title}">${page.title}</span>
-                ${this.pages.length > 1 ? '<button class="tab-close" onclick="event.stopPropagation()">&times;</button>' : ''}
+            const tabItem = document.createElement('div');
+            tabItem.className = `tab-item ${index === this.activePageIndex ? 'active' : ''}`;
+            tabItem.innerHTML = `
+                <div class="tab-content">
+                    <div class="tab-title" title="${page.title}">${page.title}</div>
+                    <div class="tab-url" title="${page.url}">${page.url}</div>
+                </div>
+                <div class="tab-actions">
+                    ${this.pages.length > 1 ? '<button class="tab-close" title="Close Tab">&times;</button>' : ''}
+                </div>
             `;
             
-            tab.addEventListener('click', () => this.switchToPage(index));
-            tab.querySelector('.tab-close')?.addEventListener('click', (e) => {
+            tabItem.addEventListener('click', (e) => {
+                // Don't switch if clicking on close button
+                if (!e.target.classList.contains('tab-close')) {
+                    this.switchToPage(index);
+                }
+            });
+            
+            tabItem.querySelector('.tab-close')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.closePage(index);
             });
             
-            tabsList.appendChild(tab);
+            tabsList.appendChild(tabItem);
         });
     }
     
@@ -397,6 +417,13 @@ class RemoteBrowserController {
     requestPagesInfo() {
         this.sendMessage({
             type: 'get_pages'
+        });
+    }
+    
+    addNewTab() {
+        console.log('Adding new tab');
+        this.sendMessage({
+            type: 'add_tab'
         });
     }
 }
