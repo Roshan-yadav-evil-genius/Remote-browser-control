@@ -11,6 +11,8 @@ class RemoteBrowserController {
         this.browserViewport = null;
         this.scale = 1;
         this.mousePosition = { x: 0, y: 0 };
+        this.pages = [];
+        this.activePageIndex = 0;
         
         this.setupEventListeners();
         this.connect();
@@ -59,6 +61,8 @@ class RemoteBrowserController {
             this.updateConnectionStatus('connected');
             this.loadingOverlay.classList.add('hidden');
             console.log('Connected to browser control server');
+            // Request initial pages info
+            this.requestPagesInfo();
         };
         
         this.ws.onmessage = (event) => {
@@ -115,6 +119,25 @@ class RemoteBrowserController {
                     this.updateCanvasSize();
                 } else {
                     console.log('Viewport unchanged, skipping updateCanvasSize');
+                }
+                break;
+                
+            case 'pages_info':
+                this.pages = message.pages;
+                this.updateTabs();
+                break;
+                
+            case 'page_switched':
+                if (message.success) {
+                    this.activePageIndex = message.page_index;
+                    this.updateTabs();
+                }
+                break;
+                
+            case 'page_closed':
+                if (message.success) {
+                    this.pages = this.pages.filter((_, index) => index !== message.page_index);
+                    this.updateTabs();
                 }
                 break;
         }
@@ -325,6 +348,56 @@ class RemoteBrowserController {
         this.connectionStatus.textContent = status === 'connected' ? 'Connected' : 
                                           status === 'connecting' ? 'Connecting...' : 'Disconnected';
         this.connectionStatus.className = `status-indicator ${status}`;
+    }
+    
+    updateTabs() {
+        const tabsContainer = document.getElementById('tabsContainer');
+        const tabsList = document.getElementById('tabsList');
+        
+        if (this.pages.length <= 1) {
+            tabsContainer.style.display = 'none';
+            return;
+        }
+        
+        tabsContainer.style.display = 'block';
+        tabsList.innerHTML = '';
+        
+        this.pages.forEach((page, index) => {
+            const tab = document.createElement('div');
+            tab.className = `tab ${index === this.activePageIndex ? 'active' : ''}`;
+            tab.innerHTML = `
+                <span class="tab-title" title="${page.title}">${page.title}</span>
+                ${this.pages.length > 1 ? '<button class="tab-close" onclick="event.stopPropagation()">&times;</button>' : ''}
+            `;
+            
+            tab.addEventListener('click', () => this.switchToPage(index));
+            tab.querySelector('.tab-close')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closePage(index);
+            });
+            
+            tabsList.appendChild(tab);
+        });
+    }
+    
+    switchToPage(pageIndex) {
+        this.sendMessage({
+            type: 'switch_page',
+            page_index: pageIndex
+        });
+    }
+    
+    closePage(pageIndex) {
+        this.sendMessage({
+            type: 'close_page',
+            page_index: pageIndex
+        });
+    }
+    
+    requestPagesInfo() {
+        this.sendMessage({
+            type: 'get_pages'
+        });
     }
 }
 
