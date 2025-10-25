@@ -199,6 +199,17 @@ class BrowserManager:
             # Automatically switch to the new page for OAuth flows
             self._active_page_index = len(self._pages) - 1
             self._page = page
+            
+            # Auto-focus popup windows immediately when they appear
+            if page != "mock":
+                try:
+                    # Use asyncio.create_task to avoid blocking the event handler
+                    import asyncio
+                    asyncio.create_task(self._ensure_page_focused(page))
+                    print(f"Auto-focusing new popup page: {page.url}")
+                except Exception as e:
+                    print(f"Warning: Could not auto-focus popup: {e}")
+            
             print(f"Added new page. Total pages: {len(self._pages)}")
         
         print(f"Pages list: {[p.url if hasattr(p, 'url') else 'mock' for p in self._pages]}")
@@ -233,6 +244,12 @@ class BrowserManager:
                 except Exception:
                     # If all else fails, just proceed with screenshot
                     pass
+            
+            # Update viewport size with actual page dimensions
+            actual_dimensions = await self.get_actual_page_dimensions()
+            if actual_dimensions != self._viewport_size:
+                print(f"Page dimensions changed from {self._viewport_size} to {actual_dimensions}")
+                self._viewport_size = actual_dimensions
             
             # Take screenshot
             screenshot_bytes = await self._page.screenshot(
@@ -295,7 +312,7 @@ class BrowserManager:
         return base64.b64encode(buffer.getvalue()).decode('utf-8')
     
     async def mouse_move(self, x: int, y: int):
-        """Move mouse to coordinates."""
+        """Move mouse to coordinates with focus verification."""
         if not self._page:
             await self.initialize()
         
@@ -304,12 +321,14 @@ class BrowserManager:
             return
         
         try:
+            # Ensure page is focused before mouse movement
+            await self._ensure_page_focused(self._page)
             await self._page.mouse.move(x, y)
         except Exception as e:
             print(f"Error in mouse_move: {e}")
     
     async def mouse_click(self, x: int, y: int, button: str = "left"):
-        """Click at coordinates."""
+        """Click at coordinates with focus verification and retry logic."""
         if not self._page:
             await self.initialize()
         
@@ -318,12 +337,21 @@ class BrowserManager:
             return
         
         try:
+            # First attempt - try to click directly
             await self._page.mouse.click(x, y, button=button)
+            print(f"Successfully clicked at ({x}, {y}) with {button} button")
         except Exception as e:
-            print(f"Error in mouse_click: {e}")
+            print(f"First click attempt failed: {e}, retrying with focus...")
+            try:
+                # Retry with focus verification
+                await self._ensure_page_focused(self._page)
+                await self._page.mouse.click(x, y, button=button)
+                print(f"Retry successful: clicked at ({x}, {y}) with {button} button")
+            except Exception as retry_e:
+                print(f"Retry also failed: {retry_e}")
     
     async def mouse_down(self, x: int, y: int, button: str = "left"):
-        """Mouse down at coordinates."""
+        """Mouse down at coordinates with focus verification."""
         if not self._page:
             await self.initialize()
         
@@ -332,13 +360,15 @@ class BrowserManager:
             return
         
         try:
+            # Ensure page is focused before mouse interaction
+            await self._ensure_page_focused(self._page)
             await self._page.mouse.move(x, y)
             await self._page.mouse.down(button=button)
         except Exception as e:
             print(f"Error in mouse_down: {e}")
     
     async def mouse_up(self, x: int, y: int, button: str = "left"):
-        """Mouse up at coordinates."""
+        """Mouse up at coordinates with focus verification."""
         if not self._page:
             await self.initialize()
         
@@ -347,13 +377,15 @@ class BrowserManager:
             return
         
         try:
+            # Ensure page is focused before mouse interaction
+            await self._ensure_page_focused(self._page)
             await self._page.mouse.move(x, y)
             await self._page.mouse.up(button=button)
         except Exception as e:
             print(f"Error in mouse_up: {e}")
     
     async def mouse_wheel(self, delta_x: int, delta_y: int):
-        """Scroll with mouse wheel."""
+        """Scroll with mouse wheel with focus verification."""
         if not self._page:
             await self.initialize()
         
@@ -362,6 +394,8 @@ class BrowserManager:
             return
         
         try:
+            # Ensure page is focused before scrolling
+            await self._ensure_page_focused(self._page)
             await self._page.mouse.wheel(delta_x, delta_y)
         except Exception as e:
             print(f"Error in mouse_wheel: {e}")
@@ -429,8 +463,27 @@ class BrowserManager:
         
         await self._page.reload()
     
+    async def get_actual_page_dimensions(self) -> tuple:
+        """Get the actual dimensions of the current page."""
+        if not self._page or self._page == "mock":
+            return self._viewport_size
+        
+        try:
+            # Get the actual viewport size of the current page
+            # viewport_size is a property, not a method
+            viewport_size = self._page.viewport_size
+            if viewport_size:
+                return (viewport_size['width'], viewport_size['height'])
+            else:
+                return self._viewport_size
+        except Exception as e:
+            print(f"Error getting page dimensions: {e}")
+            return self._viewport_size
+    
     def get_viewport_size(self) -> list:
-        """Get current viewport size."""
+        """Get current viewport size - returns actual page dimensions if available."""
+        # For synchronous access, return the stored viewport size
+        # The actual dimensions will be updated in get_screenshot()
         return list(self._viewport_size)
     
     def get_pages_info(self) -> list:
@@ -488,13 +541,35 @@ class BrowserManager:
         print(f"Returning {len(pages_info)} unique pages")
         return pages_info
     
+    async def _ensure_page_focused(self, page, timeout: int = 5000) -> bool:
+        """Ensure a page is focused and ready for interaction."""
+        if page == "mock":
+            return True
+        
+        try:
+            # Bring page to front to ensure it has focus
+            await page.bring_to_front()
+            print(f"Brought page to front: {page.url if hasattr(page, 'url') else 'unknown'}")
+            
+            # Wait for page to be in an interactive state
+            await page.wait_for_load_state('domcontentloaded', timeout=timeout)
+            print(f"Page is ready for interaction: {page.url if hasattr(page, 'url') else 'unknown'}")
+            return True
+        except Exception as e:
+            print(f"Warning: Could not focus page: {e}")
+            return False
+    
     async def switch_to_page(self, page_index: int) -> bool:
         """Switch to a specific page by index."""
         if 0 <= page_index < len(self._pages):
             self._active_page_index = page_index
             self._page = self._pages[page_index]
-            print(f"Switched to page {page_index}: {self._page.url if hasattr(self._page, 'url') else 'mock'}")
-            return True
+            
+            # Ensure the page is properly focused, especially for popup windows
+            focus_success = await self._ensure_page_focused(self._page)
+            
+            print(f"Switched to page {page_index}: {self._page.url if hasattr(self._page, 'url') else 'mock'} (focus: {'success' if focus_success else 'failed'})")
+            return focus_success
         return False
     
     async def close_page(self, page_index: int) -> bool:

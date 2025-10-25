@@ -227,12 +227,14 @@ class RemoteBrowserController {
         // Only resize if dimensions have actually changed
         if (Math.abs(this.canvas.width - canvasWidth) > 1 || Math.abs(this.canvas.height - canvasHeight) > 1) {
             console.log(`Canvas resize: ${this.canvas.width}x${this.canvas.height} -> ${canvasWidth}x${canvasHeight}`);
+            console.log(`Viewport: ${viewportWidth}x${viewportHeight}, Aspect ratio: ${aspectRatio.toFixed(3)}`);
             this.canvas.width = canvasWidth;
             this.canvas.height = canvasHeight;
         }
         
         this.scale = canvasWidth / viewportWidth;
         console.log(`Scale: ${this.scale.toFixed(3)} (canvas: ${canvasWidth} / viewport: ${viewportWidth})`);
+        console.log(`Coordinate mapping: canvas coords * ${this.scale.toFixed(3)} = browser coords`);
     }
     
     getCanvasCoordinates(event) {
