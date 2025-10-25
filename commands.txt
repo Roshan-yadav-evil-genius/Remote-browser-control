@@ -1,0 +1,2 @@
+pkill -f "uvicorn app:app" || true
+uvicorn app:app --port 8001 --reload
