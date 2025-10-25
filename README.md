@@ -2,6 +2,10 @@
 
 A FastAPI-based web application that allows clients to control a headless Playwright browser through a VNC-style web interface with real-time mouse and keyboard control, featuring advanced multi-tab management.
 
+<img src="demo/image1.png" alt="Screenshot 1" style="max-width:45%; margin-right:2%;" />
+<img src="demo/image2.png" alt="Screenshot 2" style="max-width:45%;" />
+
+
 ## Features
 
 - **Real-time Browser Control**: Control a headless Playwright browser through a web interface
