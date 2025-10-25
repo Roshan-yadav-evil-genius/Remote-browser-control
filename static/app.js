@@ -8,6 +8,7 @@ class RemoteBrowserController {
         this.urlInput = document.getElementById('urlInput');
         this.addTabBtn = document.getElementById('addTabBtn');
         this.refreshTabsBtn = document.getElementById('refreshTabsBtn');
+        this.cleanupBtn = document.getElementById('cleanupBtn');
         
         this.isConnected = false;
         this.browserViewport = null;
@@ -43,6 +44,11 @@ class RemoteBrowserController {
         // Refresh tabs button
         this.refreshTabsBtn.addEventListener('click', () => {
             this.refreshTabs();
+        });
+        
+        // Cleanup button
+        this.cleanupBtn.addEventListener('click', () => {
+            this.forceCleanup();
         });
         
         // Canvas mouse events
@@ -137,10 +143,26 @@ class RemoteBrowserController {
                 
             case 'pages_info':
                 console.log('Received pages info:', message.pages);
+                const previousPageCount = this.pages.length;
                 this.pages = message.pages;
+                
+                // Check if active page was removed
+                if (this.activePageIndex >= this.pages.length) {
+                    console.log('Active page was removed, switching to first available page');
+                    this.activePageIndex = Math.max(0, this.pages.length - 1);
+                    if (this.pages.length > 0) {
+                        this.switchToPage(this.activePageIndex);
+                    }
+                }
+                
                 this.updateTabs();
                 // Update URL bar to show current page URL
                 this.updateUrlBar();
+                
+                // Log page count changes
+                if (previousPageCount !== this.pages.length) {
+                    console.log(`Page count changed from ${previousPageCount} to ${this.pages.length}`);
+                }
                 break;
                 
             case 'page_switched':
@@ -392,6 +414,12 @@ class RemoteBrowserController {
             return;
         }
         
+        // Ensure active page index is valid
+        if (this.activePageIndex >= this.pages.length) {
+            this.activePageIndex = Math.max(0, this.pages.length - 1);
+            console.log(`Adjusted active page index to ${this.activePageIndex}`);
+        }
+        
         this.pages.forEach((page, index) => {
             const tabItem = document.createElement('div');
             tabItem.className = `tab-item ${index === this.activePageIndex ? 'active' : ''}`;
@@ -482,6 +510,13 @@ class RemoteBrowserController {
         console.log('Refreshing tabs to remove duplicates');
         this.sendMessage({
             type: 'refresh_pages'
+        });
+    }
+    
+    forceCleanup() {
+        console.log('Force cleanup of closed pages');
+        this.sendMessage({
+            type: 'force_cleanup'
         });
     }
 }
