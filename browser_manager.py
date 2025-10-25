@@ -234,6 +234,17 @@ class BrowserManager:
             return self._create_mock_screenshot()
         
         try:
+            # Check if current page is closed and handle it
+            if await self.is_page_closed(self._page):
+                print(f"Active page is closed, removing from pages list")
+                await self._remove_closed_pages()
+                # If no pages left, return error screenshot
+                if not self._pages or self._pages == ["mock"]:
+                    return self._create_error_screenshot()
+                # Switch to a valid page
+                self._active_page_index = 0
+                self._page = self._pages[0]
+            
             # Wait for page to be ready with more lenient timeout
             try:
                 await self._page.wait_for_load_state("networkidle", timeout=2000)
@@ -263,6 +274,17 @@ class BrowserManager:
             return screenshot_b64
         except Exception as e:
             print(f"Screenshot error: {e}")
+            # Check if this is a page closed error
+            if "Target page, context or browser has been closed" in str(e):
+                print("Page closed error detected, removing closed pages")
+                await self._remove_closed_pages()
+                # If no pages left, return error screenshot
+                if not self._pages or self._pages == ["mock"]:
+                    return self._create_error_screenshot()
+                # Switch to a valid page and retry
+                self._active_page_index = 0
+                self._page = self._pages[0]
+                return await self.get_screenshot()
             # Return a simple error image
             return self._create_error_screenshot()
     
@@ -486,6 +508,52 @@ class BrowserManager:
         # The actual dimensions will be updated in get_screenshot()
         return list(self._viewport_size)
     
+    async def is_page_closed(self, page) -> bool:
+        """Check if a page is closed."""
+        if page == "mock":
+            return False
+        
+        try:
+            # Try to access a property that would fail if page is closed
+            _ = page.url
+            # Also try to access the page's context to see if it's still valid
+            _ = page.context
+            # Try to get the page title - this should fail if page is closed
+            _ = await page.title()
+            return False
+        except Exception as e:
+            print(f"Page is closed: {e}")
+            return True
+    
+    async def _remove_closed_pages(self):
+        """Remove all closed pages from the pages list."""
+        if not self._pages:
+            return
+        
+        original_count = len(self._pages)
+        valid_pages = []
+        
+        for page in self._pages:
+            if page == "mock":
+                valid_pages.append(page)
+            else:
+                if not await self.is_page_closed(page):
+                    valid_pages.append(page)
+                else:
+                    print(f"Removing closed page: {getattr(page, 'url', 'unknown')}")
+        
+        self._pages = valid_pages
+        
+        # Adjust active page index if needed
+        if self._active_page_index >= len(self._pages):
+            self._active_page_index = max(0, len(self._pages) - 1)
+            if self._pages:
+                self._page = self._pages[self._active_page_index]
+        
+        removed_count = original_count - len(self._pages)
+        if removed_count > 0:
+            print(f"Removed {removed_count} closed pages. Remaining: {len(self._pages)}")
+
     def get_pages_info(self) -> list:
         """Get information about all open pages."""
         print(f"get_pages_info called, tracking {len(self._pages)} pages")
