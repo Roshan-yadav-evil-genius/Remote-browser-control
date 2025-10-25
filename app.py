@@ -64,7 +64,7 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 data = await websocket.receive_text()
                 message = json.loads(data)
-                await handle_client_message(message)
+                await handle_client_message(message, websocket)
             except WebSocketDisconnect:
                 break
             except json.JSONDecodeError:
@@ -105,7 +105,7 @@ async def stream_screenshots(websocket: WebSocket):
             logger.error(f"Error streaming screenshot: {e}")
             break
 
-async def handle_client_message(message: dict):
+async def handle_client_message(message: dict, websocket: WebSocket):
     """Handle incoming client messages."""
     try:
         message_type = message.get("type")
@@ -170,6 +170,7 @@ async def handle_client_message(message: dict):
         elif message_type == "get_pages":
             logger.info("Get pages info")
             pages_info = browser_manager.get_pages_info()
+            logger.info(f"Pages info: {pages_info}")
             await websocket.send_text(json.dumps({
                 "type": "pages_info",
                 "pages": pages_info
@@ -193,6 +194,14 @@ async def handle_client_message(message: dict):
                 "type": "page_closed",
                 "success": success,
                 "page_index": page_index
+            }))
+        
+        elif message_type == "add_tab":
+            logger.info("Add new tab")
+            success = await browser_manager.add_new_tab()
+            await websocket.send_text(json.dumps({
+                "type": "tab_added",
+                "success": success
             }))
         
         else:
