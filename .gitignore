@@ -1,3 +1,6 @@
 POC
 browser_data
 __pycache__
+.cursor
+.gemini
+.vscode
