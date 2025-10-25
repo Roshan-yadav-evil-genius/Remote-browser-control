@@ -43,7 +43,7 @@ class BrowserManager:
             cls._instance = super(BrowserManager, cls).__new__(cls)
         return cls._instance
     
-    async def initialize(self, user_data_dir: str = "./POC/browser_data"):
+    async def initialize(self, user_data_dir: str = "browser_data"):
         """Initialize the browser with persistent context."""
         if self._browser is None:
             try:
@@ -102,7 +102,7 @@ class BrowserManager:
                 print("Launching Chromium browser...")
                 self._context = await self._playwright.chromium.launch_persistent_context(
                     user_data_dir=user_data_dir,
-                    headless=True,
+                    headless=False,
                     args=[
                         "--disable-blink-features=AutomationControlled",
                         "--no-sandbox",
