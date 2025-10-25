@@ -19,6 +19,35 @@ logger = logging.getLogger(__name__)
 # Store active WebSocket connections
 active_connections = set()
 
+# Store last add_tab request time to prevent duplicates
+last_add_tab_time = 0
+
+async def broadcast_pages_update():
+    """Broadcast pages info to all connected clients."""
+    try:
+        pages_info = browser_manager.get_pages_info()
+        message = {
+            "type": "pages_info",
+            "pages": pages_info
+        }
+        
+        # Send to all active connections
+        disconnected = set()
+        for websocket in active_connections:
+            try:
+                await websocket.send_text(json.dumps(message))
+            except Exception as e:
+                logger.error(f"Error broadcasting to client: {e}")
+                disconnected.add(websocket)
+        
+        # Remove disconnected clients
+        for websocket in disconnected:
+            active_connections.discard(websocket)
+            
+        logger.info(f"Broadcasted pages update to {len(active_connections)} clients")
+    except Exception as e:
+        logger.error(f"Error broadcasting pages update: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
@@ -64,7 +93,7 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 data = await websocket.receive_text()
                 message = json.loads(data)
-                await handle_client_message(message)
+                await handle_client_message(message, websocket)
             except WebSocketDisconnect:
                 break
             except json.JSONDecodeError:
@@ -82,9 +111,15 @@ async def websocket_endpoint(websocket: WebSocket):
 async def stream_screenshots(websocket: WebSocket):
     """Stream screenshots to client at 10 FPS."""
     screenshot_count = 0
+    last_page_count = len(browser_manager._pages)
+    cleanup_counter = 0
+    
     while True:
         try:
             if websocket in active_connections:
+                # Check page count before screenshot
+                current_page_count_before = len(browser_manager._pages)
+                
                 screenshot = await browser_manager.get_screenshot()
                 screenshot_count += 1
                 
@@ -94,6 +129,25 @@ async def stream_screenshots(websocket: WebSocket):
                     "viewport": browser_manager.get_viewport_size()
                 }
                 await websocket.send_text(json.dumps(message))
+                
+                # Check if page count changed after screenshot (closed pages might have been removed)
+                current_page_count_after = len(browser_manager._pages)
+                if current_page_count_after != last_page_count:
+                    logger.info(f"Page count changed from {last_page_count} to {current_page_count_after}")
+                    await broadcast_pages_update()
+                    last_page_count = current_page_count_after
+                
+                # Periodic cleanup every 50 screenshots (5 seconds) to catch any missed closed pages
+                cleanup_counter += 1
+                if cleanup_counter >= 50:
+                    cleanup_counter = 0
+                    logger.info("Performing periodic cleanup of closed pages")
+                    await browser_manager._remove_closed_pages()
+                    current_cleanup_count = len(browser_manager._pages)
+                    if current_cleanup_count != last_page_count:
+                        logger.info(f"Periodic cleanup found page count change: {last_page_count} to {current_cleanup_count}")
+                        await broadcast_pages_update()
+                        last_page_count = current_cleanup_count
                 
                 # Log every 10th screenshot to avoid spam
                 if screenshot_count % 10 == 0:
@@ -105,38 +159,38 @@ async def stream_screenshots(websocket: WebSocket):
             logger.error(f"Error streaming screenshot: {e}")
             break
 
-async def handle_client_message(message: dict):
+async def handle_client_message(message: dict, websocket: WebSocket):
     """Handle incoming client messages."""
     try:
         message_type = message.get("type")
         
         if message_type == "mouse_move":
             x, y = message.get("x", 0), message.get("y", 0)
-            logger.info(f"Mouse move: ({x}, {y})")
+            logger.info(f"Mouse move: ({x}, {y}) on page {browser_manager._active_page_index}")
             await browser_manager.mouse_move(x, y)
         
         elif message_type == "mouse_click":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
-            logger.info(f"Mouse click: ({x}, {y}) button={button}")
+            logger.info(f"Mouse click: ({x}, {y}) button={button} on page {browser_manager._active_page_index}")
             await browser_manager.mouse_click(x, y, button)
         
         elif message_type == "mouse_down":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
-            logger.info(f"Mouse down: ({x}, {y}) button={button}")
+            logger.info(f"Mouse down: ({x}, {y}) button={button} on page {browser_manager._active_page_index}")
             await browser_manager.mouse_down(x, y, button)
         
         elif message_type == "mouse_up":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
-            logger.info(f"Mouse up: ({x}, {y}) button={button}")
+            logger.info(f"Mouse up: ({x}, {y}) button={button} on page {browser_manager._active_page_index}")
             await browser_manager.mouse_up(x, y, button)
         
         elif message_type == "mouse_wheel":
             delta_x = message.get("deltaX", 0)
             delta_y = message.get("deltaY", 0)
-            logger.info(f"Mouse wheel: deltaX={delta_x}, deltaY={delta_y}")
+            logger.info(f"Mouse wheel: deltaX={delta_x}, deltaY={delta_y} on page {browser_manager._active_page_index}")
             await browser_manager.mouse_wheel(delta_x, delta_y)
         
         elif message_type == "key_press":
@@ -170,6 +224,7 @@ async def handle_client_message(message: dict):
         elif message_type == "get_pages":
             logger.info("Get pages info")
             pages_info = browser_manager.get_pages_info()
+            logger.info(f"Pages info: {pages_info}")
             await websocket.send_text(json.dumps({
                 "type": "pages_info",
                 "pages": pages_info
@@ -177,8 +232,25 @@ async def handle_client_message(message: dict):
         
         elif message_type == "switch_page":
             page_index = message.get("page_index", 0)
-            logger.info(f"Switch to page {page_index}")
+            logger.info(f"Switch to page {page_index} - Current active page: {browser_manager._active_page_index}")
             success = await browser_manager.switch_to_page(page_index)
+            logger.info(f"Page switch result: {'success' if success else 'failed'} for page {page_index}")
+            
+            # If page switch failed, it might be because the page is closed
+            # Remove closed pages and broadcast update
+            if not success:
+                logger.info("Page switch failed, checking for closed pages and broadcasting update")
+                await browser_manager._remove_closed_pages()
+                await broadcast_pages_update()
+                
+                # Send a specific message to the client about the page being closed
+                await websocket.send_text(json.dumps({
+                    "type": "page_closed",
+                    "success": True,
+                    "page_index": page_index,
+                    "reason": "page_was_closed"
+                }))
+            
             await websocket.send_text(json.dumps({
                 "type": "page_switched",
                 "success": success,
@@ -194,6 +266,45 @@ async def handle_client_message(message: dict):
                 "success": success,
                 "page_index": page_index
             }))
+        
+        elif message_type == "add_tab":
+            import time
+            current_time = time.time()
+            global last_add_tab_time
+            
+            # Prevent duplicate requests within 5 seconds
+            if current_time - last_add_tab_time < 5.0:
+                logger.info("Add tab request ignored (too soon after last request)")
+                await websocket.send_text(json.dumps({
+                    "type": "tab_added",
+                    "success": False,
+                    "reason": "duplicate_request"
+                }))
+                return
+            
+            last_add_tab_time = current_time
+            logger.info("Add new tab")
+            success = await browser_manager.add_new_tab()
+            await websocket.send_text(json.dumps({
+                "type": "tab_added",
+                "success": success
+            }))
+        
+        elif message_type == "refresh_pages":
+            logger.info("Refresh pages list")
+            browser_manager.cleanup_duplicate_pages()
+            # Also remove closed pages during refresh
+            await browser_manager._remove_closed_pages()
+            pages_info = browser_manager.get_pages_info()
+            await websocket.send_text(json.dumps({
+                "type": "pages_info",
+                "pages": pages_info
+            }))
+        
+        elif message_type == "force_cleanup":
+            logger.info("Force cleanup of closed pages")
+            await browser_manager._remove_closed_pages()
+            await broadcast_pages_update()
         
         else:
             logger.warning(f"Unknown message type: {message_type}")

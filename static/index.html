@@ -8,13 +8,23 @@
 </head>
 <body>
     <div class="container">
-        <header class="header">
-            <div class="tabs-container" id="tabsContainer" style="display: none;">
-                <div class="tabs" id="tabsList">
-                    <!-- Tabs will be dynamically added here -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3>Browser Tabs</h3>
+                <div class="sidebar-controls">
+                    <button id="refreshTabsBtn" class="refresh-tabs-btn" title="Refresh Tabs">⟳</button>
+                    <button id="cleanupBtn" class="cleanup-btn" title="Cleanup Closed Pages">🗑️</button>
+                    <button id="addTabBtn" class="add-tab-btn" title="Add New Tab">+</button>
                 </div>
             </div>
-            <div class="controls">
+            <div class="tabs-list" id="tabsList">
+                <!-- Tabs will be dynamically added here -->
+            </div>
+        </div>
+        
+        <div class="main-content-wrapper">
+            <header class="header">
+                <div class="controls">
                 <div class="nav-buttons">
                     <button id="backBtn" title="Go Back">←</button>
                     <button id="forwardBtn" title="Go Forward">→</button>
@@ -39,6 +49,7 @@
                 </div>
             </div>
         </main>
+        </div>
     </div>
     
     <script src="/static/app.js"></script>

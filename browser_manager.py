@@ -39,6 +39,7 @@ class BrowserManager:
     _browser_type = None  # 'playwright', 'selenium', or 'mock'
     _pages = []  # List of all open pages
     _active_page_index = 0  # Index of currently active page
+    _creating_tab = False  # Flag to prevent duplicate tab creation
     
     def __new__(cls):
         if cls._instance is None:
@@ -181,11 +182,37 @@ class BrowserManager:
     def _on_new_page(self, page):
         """Handle new page events (new tabs/windows)."""
         print(f"New page opened: {page.url}")
-        self._pages.append(page)
-        # Automatically switch to the new page for OAuth flows
-        self._active_page_index = len(self._pages) - 1
-        self._page = page
-        print(f"Switched to new page. Total pages: {len(self._pages)}")
+        
+        # Check if this page already exists (same URL)
+        existing_page = None
+        for i, existing in enumerate(self._pages):
+            if existing != "mock" and hasattr(existing, 'url') and existing.url == page.url:
+                existing_page = i
+                break
+        
+        if existing_page is not None:
+            print(f"Page with URL {page.url} already exists, switching to it instead of creating duplicate")
+            self._active_page_index = existing_page
+            self._page = self._pages[existing_page]
+        else:
+            self._pages.append(page)
+            # Automatically switch to the new page for OAuth flows
+            self._active_page_index = len(self._pages) - 1
+            self._page = page
+            
+            # Auto-focus popup windows immediately when they appear
+            if page != "mock":
+                try:
+                    # Use asyncio.create_task to avoid blocking the event handler
+                    import asyncio
+                    asyncio.create_task(self._ensure_page_focused(page))
+                    print(f"Auto-focusing new popup page: {page.url}")
+                except Exception as e:
+                    print(f"Warning: Could not auto-focus popup: {e}")
+            
+            print(f"Added new page. Total pages: {len(self._pages)}")
+        
+        print(f"Pages list: {[p.url if hasattr(p, 'url') else 'mock' for p in self._pages]}")
     
     def _create_mock_browser(self):
         """Create a mock browser for testing when real browser fails."""
@@ -207,6 +234,17 @@ class BrowserManager:
             return self._create_mock_screenshot()
         
         try:
+            # Check if current page is closed and handle it
+            if await self.is_page_closed(self._page):
+                print(f"Active page is closed, removing from pages list")
+                await self._remove_closed_pages()
+                # If no pages left, return error screenshot
+                if not self._pages or self._pages == ["mock"]:
+                    return self._create_error_screenshot()
+                # Switch to a valid page
+                self._active_page_index = 0
+                self._page = self._pages[0]
+            
             # Wait for page to be ready with more lenient timeout
             try:
                 await self._page.wait_for_load_state("networkidle", timeout=2000)
@@ -217,6 +255,12 @@ class BrowserManager:
                 except Exception:
                     # If all else fails, just proceed with screenshot
                     pass
+            
+            # Update viewport size with actual page dimensions
+            actual_dimensions = await self.get_actual_page_dimensions()
+            if actual_dimensions != self._viewport_size:
+                print(f"Page dimensions changed from {self._viewport_size} to {actual_dimensions}")
+                self._viewport_size = actual_dimensions
             
             # Take screenshot
             screenshot_bytes = await self._page.screenshot(
@@ -230,6 +274,17 @@ class BrowserManager:
             return screenshot_b64
         except Exception as e:
             print(f"Screenshot error: {e}")
+            # Check if this is a page closed error
+            if "Target page, context or browser has been closed" in str(e):
+                print("Page closed error detected, removing closed pages")
+                await self._remove_closed_pages()
+                # If no pages left, return error screenshot
+                if not self._pages or self._pages == ["mock"]:
+                    return self._create_error_screenshot()
+                # Switch to a valid page and retry
+                self._active_page_index = 0
+                self._page = self._pages[0]
+                return await self.get_screenshot()
             # Return a simple error image
             return self._create_error_screenshot()
     
@@ -279,7 +334,7 @@ class BrowserManager:
         return base64.b64encode(buffer.getvalue()).decode('utf-8')
     
     async def mouse_move(self, x: int, y: int):
-        """Move mouse to coordinates."""
+        """Move mouse to coordinates with focus verification."""
         if not self._page:
             await self.initialize()
         
@@ -288,12 +343,14 @@ class BrowserManager:
             return
         
         try:
+            # Ensure page is focused before mouse movement
+            await self._ensure_page_focused(self._page)
             await self._page.mouse.move(x, y)
         except Exception as e:
             print(f"Error in mouse_move: {e}")
     
     async def mouse_click(self, x: int, y: int, button: str = "left"):
-        """Click at coordinates."""
+        """Click at coordinates with focus verification and retry logic."""
         if not self._page:
             await self.initialize()
         
@@ -302,12 +359,21 @@ class BrowserManager:
             return
         
         try:
+            # First attempt - try to click directly
             await self._page.mouse.click(x, y, button=button)
+            print(f"Successfully clicked at ({x}, {y}) with {button} button")
         except Exception as e:
-            print(f"Error in mouse_click: {e}")
+            print(f"First click attempt failed: {e}, retrying with focus...")
+            try:
+                # Retry with focus verification
+                await self._ensure_page_focused(self._page)
+                await self._page.mouse.click(x, y, button=button)
+                print(f"Retry successful: clicked at ({x}, {y}) with {button} button")
+            except Exception as retry_e:
+                print(f"Retry also failed: {retry_e}")
     
     async def mouse_down(self, x: int, y: int, button: str = "left"):
-        """Mouse down at coordinates."""
+        """Mouse down at coordinates with focus verification."""
         if not self._page:
             await self.initialize()
         
@@ -316,13 +382,15 @@ class BrowserManager:
             return
         
         try:
+            # Ensure page is focused before mouse interaction
+            await self._ensure_page_focused(self._page)
             await self._page.mouse.move(x, y)
             await self._page.mouse.down(button=button)
         except Exception as e:
             print(f"Error in mouse_down: {e}")
     
     async def mouse_up(self, x: int, y: int, button: str = "left"):
-        """Mouse up at coordinates."""
+        """Mouse up at coordinates with focus verification."""
         if not self._page:
             await self.initialize()
         
@@ -331,13 +399,15 @@ class BrowserManager:
             return
         
         try:
+            # Ensure page is focused before mouse interaction
+            await self._ensure_page_focused(self._page)
             await self._page.mouse.move(x, y)
             await self._page.mouse.up(button=button)
         except Exception as e:
             print(f"Error in mouse_up: {e}")
     
     async def mouse_wheel(self, delta_x: int, delta_y: int):
-        """Scroll with mouse wheel."""
+        """Scroll with mouse wheel with focus verification."""
         if not self._page:
             await self.initialize()
         
@@ -346,6 +416,8 @@ class BrowserManager:
             return
         
         try:
+            # Ensure page is focused before scrolling
+            await self._ensure_page_focused(self._page)
             await self._page.mouse.wheel(delta_x, delta_y)
         except Exception as e:
             print(f"Error in mouse_wheel: {e}")
@@ -413,13 +485,84 @@ class BrowserManager:
         
         await self._page.reload()
     
+    async def get_actual_page_dimensions(self) -> tuple:
+        """Get the actual dimensions of the current page."""
+        if not self._page or self._page == "mock":
+            return self._viewport_size
+        
+        try:
+            # Get the actual viewport size of the current page
+            # viewport_size is a property, not a method
+            viewport_size = self._page.viewport_size
+            if viewport_size:
+                return (viewport_size['width'], viewport_size['height'])
+            else:
+                return self._viewport_size
+        except Exception as e:
+            print(f"Error getting page dimensions: {e}")
+            return self._viewport_size
+    
     def get_viewport_size(self) -> list:
-        """Get current viewport size."""
+        """Get current viewport size - returns actual page dimensions if available."""
+        # For synchronous access, return the stored viewport size
+        # The actual dimensions will be updated in get_screenshot()
         return list(self._viewport_size)
     
+    async def is_page_closed(self, page) -> bool:
+        """Check if a page is closed."""
+        if page == "mock":
+            return False
+        
+        try:
+            # Try to access a property that would fail if page is closed
+            _ = page.url
+            # Also try to access the page's context to see if it's still valid
+            _ = page.context
+            # Try to get the page title - this should fail if page is closed
+            _ = await page.title()
+            return False
+        except Exception as e:
+            print(f"Page is closed: {e}")
+            return True
+    
+    async def _remove_closed_pages(self):
+        """Remove all closed pages from the pages list."""
+        if not self._pages:
+            return
+        
+        original_count = len(self._pages)
+        valid_pages = []
+        
+        for page in self._pages:
+            if page == "mock":
+                valid_pages.append(page)
+            else:
+                if not await self.is_page_closed(page):
+                    valid_pages.append(page)
+                else:
+                    print(f"Removing closed page: {getattr(page, 'url', 'unknown')}")
+        
+        self._pages = valid_pages
+        
+        # Adjust active page index if needed
+        if self._active_page_index >= len(self._pages):
+            self._active_page_index = max(0, len(self._pages) - 1)
+            if self._pages:
+                self._page = self._pages[self._active_page_index]
+        
+        removed_count = original_count - len(self._pages)
+        if removed_count > 0:
+            print(f"Removed {removed_count} closed pages. Remaining: {len(self._pages)}")
+
     def get_pages_info(self) -> list:
         """Get information about all open pages."""
+        print(f"get_pages_info called, tracking {len(self._pages)} pages")
+        
+        # Clean up duplicate pages first
+        self.cleanup_duplicate_pages()
+        
         pages_info = []
+        
         for i, page in enumerate(self._pages):
             if page == "mock":
                 pages_info.append({
@@ -430,28 +573,71 @@ class BrowserManager:
                 })
             else:
                 try:
+                    # Get URL and title safely
+                    url = getattr(page, 'url', 'unknown://page')
+                    title = "Unknown Page"
+                    try:
+                        # Try to get title synchronously if possible
+                        if hasattr(page, '_title'):
+                            title = page._title
+                        elif hasattr(page, 'url'):
+                            # Extract title from URL or use a default
+                            if 'google.com' in url.lower():
+                                title = "Google"
+                            elif 'scrapingbee' in url.lower():
+                                title = "ScrapingBee"
+                            else:
+                                title = "Browser Tab"
+                    except:
+                        title = "Browser Tab"
+                    
                     pages_info.append({
                         "index": i,
-                        "url": page.url,
-                        "title": page.title() if hasattr(page, 'title') else "Unknown",
+                        "url": url,
+                        "title": title,
                         "active": i == self._active_page_index
                     })
-                except:
+                except Exception as e:
+                    print(f"Error getting page info for page {i}: {e}")
                     pages_info.append({
                         "index": i,
                         "url": "unknown://page",
                         "title": "Unknown Page",
                         "active": i == self._active_page_index
                     })
+        
+        print(f"Returning {len(pages_info)} unique pages")
         return pages_info
+    
+    async def _ensure_page_focused(self, page, timeout: int = 5000) -> bool:
+        """Ensure a page is focused and ready for interaction."""
+        if page == "mock":
+            return True
+        
+        try:
+            # Bring page to front to ensure it has focus
+            await page.bring_to_front()
+            print(f"Brought page to front: {page.url if hasattr(page, 'url') else 'unknown'}")
+            
+            # Wait for page to be in an interactive state
+            await page.wait_for_load_state('domcontentloaded', timeout=timeout)
+            print(f"Page is ready for interaction: {page.url if hasattr(page, 'url') else 'unknown'}")
+            return True
+        except Exception as e:
+            print(f"Warning: Could not focus page: {e}")
+            return False
     
     async def switch_to_page(self, page_index: int) -> bool:
         """Switch to a specific page by index."""
         if 0 <= page_index < len(self._pages):
             self._active_page_index = page_index
             self._page = self._pages[page_index]
-            print(f"Switched to page {page_index}: {self._page.url if hasattr(self._page, 'url') else 'mock'}")
-            return True
+            
+            # Ensure the page is properly focused, especially for popup windows
+            focus_success = await self._ensure_page_focused(self._page)
+            
+            print(f"Switched to page {page_index}: {self._page.url if hasattr(self._page, 'url') else 'mock'} (focus: {'success' if focus_success else 'failed'})")
+            return focus_success
         return False
     
     async def close_page(self, page_index: int) -> bool:
@@ -470,6 +656,74 @@ class BrowserManager:
             print(f"Closed page {page_index}. Active page: {self._active_page_index}")
             return True
         return False
+    
+    def cleanup_duplicate_pages(self):
+        """Remove duplicate pages based on URL."""
+        if not self._pages:
+            return
+        
+        seen_urls = set()
+        unique_pages = []
+        
+        for page in self._pages:
+            if page == "mock":
+                unique_pages.append(page)
+            else:
+                try:
+                    url = getattr(page, 'url', 'unknown://page')
+                    if url not in seen_urls:
+                        seen_urls.add(url)
+                        unique_pages.append(page)
+                    else:
+                        print(f"Removing duplicate page with URL: {url}")
+                except:
+                    unique_pages.append(page)
+        
+        if len(unique_pages) != len(self._pages):
+            print(f"Cleaned up {len(self._pages) - len(unique_pages)} duplicate pages")
+            self._pages = unique_pages
+            # Adjust active page index if needed
+            if self._active_page_index >= len(self._pages):
+                self._active_page_index = max(0, len(self._pages) - 1)
+                if self._pages:
+                    self._page = self._pages[self._active_page_index]
+    
+    async def add_new_tab(self) -> bool:
+        """Add a new tab to the browser."""
+        try:
+            if self._context and self._context != "mock":
+                # Prevent multiple simultaneous tab creation
+                if self._creating_tab:
+                    print("Tab creation already in progress, ignoring duplicate request")
+                    return False
+                
+                self._creating_tab = True
+                
+                # Check if we already have a Google tab to avoid duplicates
+                google_tabs = [page for page in self._pages if hasattr(page, 'url') and 'google.com' in page.url]
+                if google_tabs:
+                    print(f"Google tab already exists, switching to it. Total pages: {len(self._pages)}")
+                    self._active_page_index = self._pages.index(google_tabs[0])
+                    self._page = google_tabs[0]
+                    self._creating_tab = False
+                    return True
+                
+                print(f"Creating new Google tab. Current pages: {len(self._pages)}")
+                new_page = await self._context.new_page()
+                await new_page.goto("https://www.google.com")
+                self._pages.append(new_page)
+                self._active_page_index = len(self._pages) - 1
+                self._page = new_page
+                print(f"Added new tab with Google.com. Total pages: {len(self._pages)}")
+                self._creating_tab = False
+                return True
+            else:
+                print("Cannot add new tab in mock mode")
+                return False
+        except Exception as e:
+            print(f"Error adding new tab: {e}")
+            self._creating_tab = False
+            return False
     
     async def close(self):
         """Close the browser."""
