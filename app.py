@@ -115,31 +115,31 @@ async def handle_client_message(message: dict, websocket: WebSocket):
         
         if message_type == "mouse_move":
             x, y = message.get("x", 0), message.get("y", 0)
-            logger.info(f"Mouse move: ({x}, {y})")
+            logger.info(f"Mouse move: ({x}, {y}) on page {browser_manager._active_page_index}")
             await browser_manager.mouse_move(x, y)
         
         elif message_type == "mouse_click":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
-            logger.info(f"Mouse click: ({x}, {y}) button={button}")
+            logger.info(f"Mouse click: ({x}, {y}) button={button} on page {browser_manager._active_page_index}")
             await browser_manager.mouse_click(x, y, button)
         
         elif message_type == "mouse_down":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
-            logger.info(f"Mouse down: ({x}, {y}) button={button}")
+            logger.info(f"Mouse down: ({x}, {y}) button={button} on page {browser_manager._active_page_index}")
             await browser_manager.mouse_down(x, y, button)
         
         elif message_type == "mouse_up":
             x, y = message.get("x", 0), message.get("y", 0)
             button = message.get("button", "left")
-            logger.info(f"Mouse up: ({x}, {y}) button={button}")
+            logger.info(f"Mouse up: ({x}, {y}) button={button} on page {browser_manager._active_page_index}")
             await browser_manager.mouse_up(x, y, button)
         
         elif message_type == "mouse_wheel":
             delta_x = message.get("deltaX", 0)
             delta_y = message.get("deltaY", 0)
-            logger.info(f"Mouse wheel: deltaX={delta_x}, deltaY={delta_y}")
+            logger.info(f"Mouse wheel: deltaX={delta_x}, deltaY={delta_y} on page {browser_manager._active_page_index}")
             await browser_manager.mouse_wheel(delta_x, delta_y)
         
         elif message_type == "key_press":
@@ -181,8 +181,9 @@ async def handle_client_message(message: dict, websocket: WebSocket):
         
         elif message_type == "switch_page":
             page_index = message.get("page_index", 0)
-            logger.info(f"Switch to page {page_index}")
+            logger.info(f"Switch to page {page_index} - Current active page: {browser_manager._active_page_index}")
             success = await browser_manager.switch_to_page(page_index)
+            logger.info(f"Page switch result: {'success' if success else 'failed'} for page {page_index}")
             await websocket.send_text(json.dumps({
                 "type": "page_switched",
                 "success": success,
