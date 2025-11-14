@@ -2,6 +2,8 @@
 
 A FastAPI-based web application that allows clients to control a headless Playwright browser through a VNC-style web interface with real-time mouse and keyboard control, featuring advanced multi-tab management.
 
+- Check New And Better Version: https://github.com/Roshan-yadav-evil-genius/Remote-browser-control-v2
+
 <img src="demo/image1.png" alt="Screenshot 1" style="max-width:45%; margin-right:2%;" />
 <img src="demo/image2.png" alt="Screenshot 2" style="max-width:45%;" />
 
